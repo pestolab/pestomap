@@ -1,0 +1,111 @@
+{
+  "_comment": "레이어 이름에 키워드가 포함되면 해당 색상이 자동 적용됩니다. HEX 값을 바꿔서 색상을 수정할 수 있어요.",
+
+  "layers": {
+    "지적": {
+      "type": "polygon",
+      "fill_color": "#FFFDE7",
+      "stroke_color": "#BDBDBD",
+      "stroke_width": 0.26,
+      "opacity": 0.8,
+      "label": "연속지적도"
+    },
+    "필지": {
+      "type": "polygon",
+      "fill_color": "#FFFDE7",
+      "stroke_color": "#BDBDBD",
+      "stroke_width": 0.26,
+      "opacity": 0.8,
+      "label": "필지"
+    },
+    "도로": {
+      "type": "polygon",
+      "fill_color": "#E0E0E0",
+      "stroke_color": "#9E9E9E",
+      "stroke_width": 0.26,
+      "opacity": 1.0,
+      "label": "도로"
+    },
+    "하천": {
+      "type": "polygon",
+      "fill_color": "#B3E5FC",
+      "stroke_color": "#0288D1",
+      "stroke_width": 0.5,
+      "opacity": 0.9,
+      "label": "하천"
+    },
+    "수계": {
+      "type": "polygon",
+      "fill_color": "#B3E5FC",
+      "stroke_color": "#0288D1",
+      "stroke_width": 0.5,
+      "opacity": 0.9,
+      "label": "수계"
+    },
+    "녹지": {
+      "type": "polygon",
+      "fill_color": "#C8E6C9",
+      "stroke_color": "#388E3C",
+      "stroke_width": 0.26,
+      "opacity": 0.8,
+      "label": "녹지"
+    },
+    "공원": {
+      "type": "polygon",
+      "fill_color": "#A5D6A7",
+      "stroke_color": "#2E7D32",
+      "stroke_width": 0.26,
+      "opacity": 0.8,
+      "label": "공원"
+    },
+    "용도지역": {
+      "type": "polygon",
+      "fill_color": "#F3E5F5",
+      "stroke_color": "#7B1FA2",
+      "stroke_width": 0.26,
+      "opacity": 0.5,
+      "label": "용도지역"
+    },
+    "용도지구": {
+      "type": "polygon",
+      "fill_color": "#EDE7F6",
+      "stroke_color": "#512DA8",
+      "stroke_width": 0.26,
+      "opacity": 0.5,
+      "label": "용도지구"
+    },
+    "지하철": {
+      "type": "line",
+      "fill_color": "#F44336",
+      "stroke_color": "#F44336",
+      "stroke_width": 1.5,
+      "opacity": 1.0,
+      "label": "지하철"
+    },
+    "철도": {
+      "type": "line",
+      "fill_color": "#795548",
+      "stroke_color": "#795548",
+      "stroke_width": 1.5,
+      "opacity": 1.0,
+      "label": "철도"
+    }
+  },
+
+  "default": {
+    "type": "polygon",
+    "fill_color": "#F5F5F5",
+    "stroke_color": "#9E9E9E",
+    "stroke_width": 0.26,
+    "opacity": 0.7,
+    "label": "기타"
+  },
+
+  "output": {
+    "dpi": 300,
+    "format": "pdf",
+    "paper_size": "A3",
+    "orientation": "landscape",
+    "margin_mm": 10
+  }
+}
