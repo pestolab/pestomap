@@ -104,17 +104,12 @@ def create_print_layout(iface, output_path, fmt, config):
 
     # 지도 아이템
     map_item = QgsLayoutItemMap(layout)
-    map_item.setRect(20, 20, 20, 20)
     layout.addLayoutItem(map_item)
-    map_item.attemptSetSceneRect(
-        map_item.mapToScene(map_item.boundingRect()).boundingRect()
-    )
-    map_item.setPos(
+    map_h = h - margin * 2 - 20   # 하단 스케일바 공간 확보
+    map_w = w - margin * 2 - 35   # 우측 방위표 공간 확보
+    map_item.attemptMove(
         QgsLayoutPoint(margin, margin, QgsUnitTypes.LayoutMillimeters)
     )
-    # 지도 높이 = 전체 - 여백 - 하단 여백(스케일바 공간)
-    map_h = h - margin * 2 - 20
-    map_w = w - margin * 2 - 40  # 우측 방위표 공간
     map_item.attemptResize(
         QgsLayoutSize(map_w, map_h, QgsUnitTypes.LayoutMillimeters)
     )
@@ -141,11 +136,16 @@ def create_print_layout(iface, output_path, fmt, config):
     # 방위표 (QGIS 내장 SVG)
     north_arrow = QgsLayoutItemPicture(layout)
     layout.addLayoutItem(north_arrow)
-    svg_paths = [
-        os.path.join(QgsApplication.prefixPath(), 'svg', 'arrows', 'NorthArrow_02.svg'),
-        os.path.join(QgsApplication.prefixPath(), 'svg', 'arrows', 'north_arrow.svg'),
+    prefix = QgsApplication.prefixPath()
+    svg_candidates = [
+        os.path.join(prefix, 'svg', 'arrows', 'NorthArrow_02.svg'),
+        os.path.join(prefix, 'svg', 'arrows', 'NorthArrow_01.svg'),
+        os.path.join(prefix, 'svg', 'north_arrows', 'NorthArrow_02.svg'),
+        # Windows QGIS 일반 경로
+        r'C:\Program Files\QGIS 3.34\apps\qgis\svg\arrows\NorthArrow_02.svg',
+        r'C:\Program Files\QGIS 3.28\apps\qgis\svg\arrows\NorthArrow_02.svg',
     ]
-    for svg in svg_paths:
+    for svg in svg_candidates:
         if os.path.exists(svg):
             north_arrow.setPicturePath(svg)
             break
