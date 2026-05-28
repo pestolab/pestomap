@@ -11,7 +11,7 @@ from qgis.PyQt.QtWidgets import (
     QComboBox, QGroupBox, QCheckBox,
     QMessageBox, QTextEdit
 )
-from qgis.PyQt.QtCore import QThread, pyqtSignal, QObject, pyqtSlot
+from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot
 from qgis.PyQt.QtGui import QFont, QColor, QTextCursor
 
 from qgis.core import (
@@ -301,6 +301,69 @@ def create_print_layout(iface, output_path, fmt, config, loaded_layers=None):
     return result == QgsLayoutExporter.Success
 
 
+# ── 플로팅 채팅 창 ───────────────────────────────────────────────────────────
+
+class ChatFloatWindow(QDialog):
+    """플러그인 창과 독립적으로 띄울 수 있는 채팅 전용 창"""
+
+    def __init__(self, parent_dialog):
+        super().__init__(parent_dialog.iface.mainWindow())
+        self.parent_dialog = parent_dialog
+        self.setWindowTitle('PestoMap AI 어시스턴트')
+        self.setMinimumWidth(480)
+        self.setMinimumHeight(500)
+        try:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        except AttributeError:
+            self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(8)
+
+        self.display = QTextEdit()
+        self.display.setReadOnly(True)
+        self.display.setStyleSheet(
+            'background:#ffffff; color:#222222; font-size:13px;'
+            'border:1px solid #dee2e6; border-radius:4px; padding:8px;'
+        )
+        # 기존 채팅 내용 복사
+        self.display.setHtml(self.parent_dialog.chat_display.toHtml())
+        layout.addWidget(self.display)
+
+        row = QHBoxLayout()
+        self.input = QLineEdit()
+        self.input.setPlaceholderText('예: 건물 연도별로 색칠해줘 / PDF 뽑아줘 / 되돌려줘')
+        self.input.returnPressed.connect(self._send)
+        self.send_btn = QPushButton('전송')
+        self.send_btn.setFixedWidth(60)
+        self.send_btn.clicked.connect(self._send)
+        row.addWidget(self.input)
+        row.addWidget(self.send_btn)
+        layout.addLayout(row)
+
+    def _send(self):
+        msg = self.input.text().strip()
+        if not msg:
+            return
+        self.input.clear()
+        # 메인 다이얼로그의 입력창에 넣고 전송
+        self.parent_dialog.chat_input.setText(msg)
+        self.parent_dialog._send_chat()
+
+    def append_chat(self, html_line):
+        self.display.append(html_line)
+        self.display.moveCursor(
+            QTextCursor.MoveOperation.End
+            if hasattr(QTextCursor, 'MoveOperation')
+            else QTextCursor.End
+        )
+
+    def set_send_enabled(self, enabled):
+        self.send_btn.setEnabled(enabled)
+
+
 # ── Dialog ───────────────────────────────────────────────────────────────────
 
 class PestoMapDialog(QDialog):
@@ -313,6 +376,7 @@ class PestoMapDialog(QDialog):
         self._undo_stack = []       # [(layer, renderer_clone), ...]
         self._session = None        # 현재 세션 dict
         self._session_path = None   # session.json 저장 경로
+        self._chat_window = None    # 플로팅 채팅 창
         self.setWindowTitle('PestoMap v0.3')
         self.setMinimumWidth(520)
         self.setMinimumHeight(640)
@@ -379,11 +443,21 @@ class PestoMapDialog(QDialog):
         ai_group = QGroupBox('4. AI 어시스턴트')
         ai_layout = QVBoxLayout(ai_group)
 
+        ai_header = QHBoxLayout()
+        ai_header.addStretch()
+        pop_btn = QPushButton('↗ 채팅 창 분리')
+        pop_btn.setFixedHeight(24)
+        pop_btn.setStyleSheet('font-size:11px; padding:0 8px; border:1px solid #ccc; border-radius:3px;')
+        pop_btn.clicked.connect(self._pop_chat)
+        ai_header.addWidget(pop_btn)
+        ai_layout.addLayout(ai_header)
+
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
-        self.chat_display.setMinimumHeight(220)
+        self.chat_display.setMinimumHeight(200)
         self.chat_display.setStyleSheet(
-            'background:#f8f9fa; font-size:12px; border:1px solid #dee2e6; border-radius:4px; padding:6px;'
+            'background:#ffffff; color:#222222; font-size:12px;'
+            'border:1px solid #dee2e6; border-radius:4px; padding:6px;'
         )
         ai_layout.addWidget(self.chat_display)
 
@@ -445,14 +519,30 @@ class PestoMapDialog(QDialog):
                 pass
 
     def _chat(self, speaker, msg):
-        colors = {'AI': ('#1a4a8a', '🤖 AI'), 'USER': ('#2d6a2d', '👤 나'), 'SYS': ('#888', '▸')}
-        color, label = colors.get(speaker, ('#888', '▸'))
-        self.chat_display.append(
-            f'<span style="color:{color};font-weight:bold;">{label}</span>&nbsp;{msg}'
-        )
-        self.chat_display.moveCursor(QTextCursor.MoveOperation.End
-                                      if hasattr(QTextCursor, 'MoveOperation')
-                                      else QTextCursor.End)
+        colors = {
+            'AI':   ('#1a4a8a', '🤖 AI'),
+            'USER': ('#1a6b1a', '👤 나'),
+            'SYS':  ('#555555', '▸'),
+        }
+        color, label = colors.get(speaker, ('#555555', '▸'))
+        line = (f'<span style="color:{color};font-weight:bold;">{label}</span>'
+                f'&nbsp;<span style="color:#222222;">{msg}</span>')
+        self.chat_display.append(line)
+        end = (QTextCursor.MoveOperation.End
+               if hasattr(QTextCursor, 'MoveOperation')
+               else QTextCursor.End)
+        self.chat_display.moveCursor(end)
+        # 플로팅 창 동기화
+        if self._chat_window and self._chat_window.isVisible():
+            self._chat_window.append_chat(line)
+
+    def _pop_chat(self):
+        """채팅 창 분리 — 별도 플로팅 창으로 팝아웃"""
+        if self._chat_window and self._chat_window.isVisible():
+            self._chat_window.raise_()
+            return
+        self._chat_window = ChatFloatWindow(self)
+        self._chat_window.show()
 
     # ── 레이어 로드 ──
 
@@ -554,6 +644,8 @@ class PestoMapDialog(QDialog):
 
         api_key = self.config.get('gemini_api_key', '')
         self.send_btn.setEnabled(False)
+        if self._chat_window and self._chat_window.isVisible():
+            self._chat_window.set_send_enabled(False)
 
         self._gemini_thread = QThread()
         self._worker = GeminiWorker(api_key, prompt)
@@ -568,6 +660,8 @@ class PestoMapDialog(QDialog):
     @pyqtSlot(object, object)
     def _on_ai_response(self, parsed, error):
         self.send_btn.setEnabled(True)
+        if self._chat_window and self._chat_window.isVisible():
+            self._chat_window.set_send_enabled(True)
 
         if error:
             self._chat('SYS', f'AI 오류: {error}')
