@@ -17,9 +17,25 @@ from qgis.core import (
     QgsSingleSymbolRenderer, QgsWkbTypes,
     QgsPrintLayout, QgsLayoutItemMap, QgsLayoutItemScaleBar,
     QgsLayoutItemPicture, QgsLayoutItemLabel,
-    QgsLayoutPoint, QgsLayoutSize, QgsUnitTypes,
+    QgsLayoutPoint, QgsLayoutSize,
     QgsLayoutExporter, QgsApplication, QgsRectangle
 )
+
+# QGIS 3 / 4 호환 — QgsUnitTypes → Qgis enum (QGIS 4.0+)
+try:
+    from qgis.core import Qgis
+    LAYOUT_MM = Qgis.LayoutUnit.Millimeters
+    DISTANCE_M = Qgis.DistanceUnit.Meters
+except AttributeError:
+    from qgis.core import QgsUnitTypes
+    LAYOUT_MM = QgsUnitTypes.LayoutMillimeters
+    DISTANCE_M = QgsUnitTypes.DistanceMeters
+
+# PyQt5 / PyQt6 호환 — QFont.Bold → QFont.Weight.Bold (PyQt6)
+try:
+    FONT_BOLD = QFont.Weight.Bold
+except AttributeError:
+    FONT_BOLD = QFont.Bold
 
 
 PLUGIN_DIR = os.path.dirname(__file__)
@@ -90,14 +106,14 @@ def create_print_layout(iface, output_path, fmt, config, loaded_layers=None):
 
     if paper.get('paper_size', 'A3') == 'A3':
         if orientation == 'landscape':
-            page.setPageSize(QgsLayoutSize(420, 297, QgsUnitTypes.LayoutMillimeters))
+            page.setPageSize(QgsLayoutSize(420, 297, LAYOUT_MM))
         else:
-            page.setPageSize(QgsLayoutSize(297, 420, QgsUnitTypes.LayoutMillimeters))
+            page.setPageSize(QgsLayoutSize(297, 420, LAYOUT_MM))
     else:
         if orientation == 'landscape':
-            page.setPageSize(QgsLayoutSize(297, 210, QgsUnitTypes.LayoutMillimeters))
+            page.setPageSize(QgsLayoutSize(297, 210, LAYOUT_MM))
         else:
-            page.setPageSize(QgsLayoutSize(210, 297, QgsUnitTypes.LayoutMillimeters))
+            page.setPageSize(QgsLayoutSize(210, 297, LAYOUT_MM))
 
     margin = paper.get('margin_mm', 10)
     w = page.pageSize().width()
@@ -109,10 +125,10 @@ def create_print_layout(iface, output_path, fmt, config, loaded_layers=None):
     map_h = h - margin * 2 - 20   # 하단 스케일바 공간 확보
     map_w = w - margin * 2 - 35   # 우측 방위표 공간 확보
     map_item.attemptMove(
-        QgsLayoutPoint(margin, margin, QgsUnitTypes.LayoutMillimeters)
+        QgsLayoutPoint(margin, margin, LAYOUT_MM)
     )
     map_item.attemptResize(
-        QgsLayoutSize(map_w, map_h, QgsUnitTypes.LayoutMillimeters)
+        QgsLayoutSize(map_w, map_h, LAYOUT_MM)
     )
     # 출력 범위: 로드된 레이어 전체 합산 extent 사용 (캔버스 갱신 타이밍 문제 방지)
     if loaded_layers:
@@ -133,15 +149,15 @@ def create_print_layout(iface, output_path, fmt, config, loaded_layers=None):
     scale_bar.setLinkedMap(map_item)
     scale_bar.applyDefaultSize()
     scale_bar.setStyle('Single Box')
-    scale_bar.setUnits(QgsUnitTypes.DistanceMeters)
+    scale_bar.setUnits(DISTANCE_M)
     scale_bar.setNumberOfSegments(4)
     scale_bar.setNumberOfSegmentsLeft(0)
     scale_bar.setFont(QFont('Arial', 7))
     scale_bar.attemptMove(
-        QgsLayoutPoint(margin, h - margin - 12, QgsUnitTypes.LayoutMillimeters)
+        QgsLayoutPoint(margin, h - margin - 12, LAYOUT_MM)
     )
     scale_bar.attemptResize(
-        QgsLayoutSize(60, 10, QgsUnitTypes.LayoutMillimeters)
+        QgsLayoutSize(60, 10, LAYOUT_MM)
     )
 
     # 방위표 (QGIS 내장 SVG)
@@ -161,10 +177,10 @@ def create_print_layout(iface, output_path, fmt, config, loaded_layers=None):
             north_arrow.setPicturePath(svg)
             break
     north_arrow.attemptMove(
-        QgsLayoutPoint(w - margin - 28, margin, QgsUnitTypes.LayoutMillimeters)
+        QgsLayoutPoint(w - margin - 28, margin, LAYOUT_MM)
     )
     north_arrow.attemptResize(
-        QgsLayoutSize(22, 28, QgsUnitTypes.LayoutMillimeters)
+        QgsLayoutSize(22, 28, LAYOUT_MM)
     )
 
     # 출력
@@ -196,7 +212,7 @@ class PestoMapDialog(QDialog):
 
         # 타이틀
         title = QLabel('PestoMap')
-        title.setFont(QFont('Arial', 14, QFont.Bold))
+        title.setFont(QFont('Arial', 14, FONT_BOLD))
         layout.addWidget(title)
 
         sub = QLabel('shp 폴더 지정 → 레이어 로드 + 색상 적용 + 지도 출력')
