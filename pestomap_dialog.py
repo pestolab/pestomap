@@ -1,25 +1,25 @@
 import os
 import json
 import glob
+import subprocess
 import urllib.request
 import urllib.error
-import threading
 
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog,
     QComboBox, QGroupBox, QCheckBox,
-    QMessageBox, QTextEdit, QSizePolicy
+    QMessageBox, QTextEdit
 )
-from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot
+from qgis.PyQt.QtCore import QThread, pyqtSignal, QObject, pyqtSlot
 from qgis.PyQt.QtGui import QFont, QColor, QTextCursor
 
 from qgis.core import (
-    QgsProject, QgsVectorLayer,
+    QgsProject, QgsVectorLayer, QgsFeatureRequest,
     QgsSymbol, QgsSimpleFillSymbolLayer, QgsSimpleLineSymbolLayer,
     QgsSingleSymbolRenderer, QgsWkbTypes,
     QgsGraduatedSymbolRenderer, QgsCategorizedSymbolRenderer,
-    QgsRendererRange, QgsRendererCategory,
+    QgsRendererCategory,
     QgsGradientColorRamp,
     QgsPrintLayout, QgsLayoutItemMap, QgsLayoutItemScaleBar,
     QgsLayoutItemPicture,
@@ -60,8 +60,13 @@ CONFIG_PATH = os.path.join(PLUGIN_DIR, 'config.json')
 
 
 def load_config():
-    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise RuntimeError(f'config.json을 찾을 수 없습니다: {CONFIG_PATH}')
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f'config.json 파싱 오류: {e}')
 
 
 GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
@@ -207,15 +212,12 @@ def build_layer_context(layers):
     lines = []
     for layer in layers:
         geom_label = {0: '포인트', 1: '라인', 2: '폴리곤'}.get(int(layer.geometryType()), '?')
+        # 샘플 3개만 먼저 수집 (한 번만 순회)
+        sample_feats = list(layer.getFeatures(QgsFeatureRequest().setLimit(3)))
         fields = []
         for f in layer.fields():
-            samples = []
-            for feat in layer.getFeatures():
-                v = feat[f.name()]
-                if v is not None:
-                    samples.append(str(v))
-                if len(samples) >= 3:
-                    break
+            samples = [str(feat[f.name()]) for feat in sample_feats
+                       if feat[f.name()] is not None]
             fields.append(f"{f.name()}({f.typeName()}, 예:{','.join(samples)})")
         lines.append(f"레이어: {layer.name()} [{geom_label}]\n  필드: {', '.join(fields[:12])}")
     return '\n'.join(lines)
@@ -422,13 +424,11 @@ class PestoMapDialog(QDialog):
             self.out_path.setText(p)
 
     def _open_config(self):
-        import subprocess
         try:
-            subprocess.Popen(['notepad.exe', CONFIG_PATH])
+            subprocess.Popen(['notepad.exe', CONFIG_PATH])  # Windows
         except Exception:
             try:
-                import subprocess
-                subprocess.Popen(['open', CONFIG_PATH])
+                subprocess.Popen(['open', CONFIG_PATH])     # macOS
             except Exception:
                 pass
 
@@ -521,6 +521,10 @@ class PestoMapDialog(QDialog):
     # ── Gemini 호출 ──
 
     def _call_gemini(self, prompt):
+        # 이전 스레드 실행 중이면 무시
+        if self._gemini_thread is not None and self._gemini_thread.isRunning():
+            return
+
         api_key = self.config.get('gemini_api_key', '')
         self.send_btn.setEnabled(False)
 
@@ -530,6 +534,8 @@ class PestoMapDialog(QDialog):
         self._gemini_thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_ai_response)
         self._worker.finished.connect(self._gemini_thread.quit)
+        self._gemini_thread.finished.connect(self._worker.deleteLater)
+        self._gemini_thread.finished.connect(self._gemini_thread.deleteLater)
         self._gemini_thread.start()
 
     @pyqtSlot(object, object)
@@ -577,12 +583,14 @@ class PestoMapDialog(QDialog):
 
         elif atype == 'categorized':
             if not target:
+                self._chat('SYS', f'레이어 없음: {layer_name}')
                 return
             ok = apply_categorized_style(target, action.get('field', ''), action.get('categories', {}))
             self._chat('SYS', f'✓ {target.name()} 범주 분류 적용' if ok else f'✗ {target.name()} 범주 분류 실패')
 
         elif atype == 'single':
             if not target:
+                self._chat('SYS', f'레이어 없음: {layer_name}')
                 return
             apply_single_style(target, {
                 'fill_color': action.get('fill_color', '#F5F5F5'),
