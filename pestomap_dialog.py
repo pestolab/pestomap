@@ -598,17 +598,11 @@ class PestoMapDialog(QDialog):
 
         self.run_btn.setEnabled(True)
 
-        # AI 자동 분석
         api_key = self.config.get('gemini_api_key', '')
-        if api_key and self.loaded_layers:
-            ctx = build_layer_context(self.loaded_layers)
-            prompt = (f"{SYSTEM_PROMPT}\n\n로드된 레이어:\n{ctx}\n\n"
-                      "레이어들을 분석해서 도시계획 실무에 적합한 시각화를 자동 적용해줘. "
-                      "어떤 필드 기준으로 무슨 색상을 적용했는지 간결하게 설명해줘.")
-            self._chat('AI', '레이어 분석 중...')
-            self._call_gemini(prompt)
+        if api_key:
+            self._chat('AI', '레이어 로드 완료! 아래 입력창에 원하는 작업을 말해주세요. (예: "건물 색칠해줘", "도로 강조해줘")')
         else:
-            self._chat('AI', '레이어 로드 완료! 아래 입력창에 원하는 작업을 말해주세요.')
+            self._chat('SYS', '레이어 로드 완료.')
 
     # ── 채팅 전송 ──
 
@@ -655,6 +649,7 @@ class PestoMapDialog(QDialog):
         self._worker.finished.connect(self._gemini_thread.quit)
         self._gemini_thread.finished.connect(self._worker.deleteLater)
         self._gemini_thread.finished.connect(self._gemini_thread.deleteLater)
+        self._gemini_thread.finished.connect(lambda: setattr(self, '_gemini_thread', None))
         self._gemini_thread.start()
 
     @pyqtSlot(object, object)
