@@ -1,8 +1,10 @@
 import os
 import json
 import glob
+import time
 import subprocess
 import urllib.request
+import urllib.error
 from datetime import datetime
 
 from qgis.PyQt.QtWidgets import (
@@ -105,34 +107,48 @@ class GeminiWorker(QObject):
 
     @pyqtSlot()
     def run(self):
-        try:
-            url = f'{GEMINI_URL}?key={self.api_key}'
-            body = json.dumps({
-                'contents': [{'parts': [{'text': self.prompt}]}],
-                'generationConfig': {'temperature': 0.2}
-            }).encode('utf-8')
-            req = urllib.request.Request(
-                url, data=body,
-                headers={'Content-Type': 'application/json'},
-                method='POST'
-            )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                raw = json.loads(resp.read().decode('utf-8'))
-                text = raw['candidates'][0]['content']['parts'][0]['text'].strip()
-                # 코드블록 제거
-                if '```' in text:
-                    for part in text.split('```'):
-                        part = part.strip()
-                        if part.startswith('json'):
-                            text = part[4:].strip()
-                            break
-                        if part.startswith('{'):
-                            text = part
-                            break
-                parsed = json.loads(text)
-                self.finished.emit(parsed, None)
-        except Exception as e:
-            self.finished.emit(None, str(e))
+        url = f'{GEMINI_URL}?key={self.api_key}'
+        body = json.dumps({
+            'contents': [{'parts': [{'text': self.prompt}]}],
+            'generationConfig': {'temperature': 0.2}
+        }).encode('utf-8')
+
+        delays = [3, 8]  # 429 시 재시도 대기 (초)
+        last_error = None
+        for attempt in range(len(delays) + 1):
+            try:
+                req = urllib.request.Request(
+                    url, data=body,
+                    headers={'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    raw = json.loads(resp.read().decode('utf-8'))
+                    text = raw['candidates'][0]['content']['parts'][0]['text'].strip()
+                    if '```' in text:
+                        for part in text.split('```'):
+                            part = part.strip()
+                            if part.startswith('json'):
+                                text = part[4:].strip()
+                                break
+                            if part.startswith('{'):
+                                text = part
+                                break
+                    parsed = json.loads(text)
+                    self.finished.emit(parsed, None)
+                    return
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and attempt < len(delays):
+                    last_error = e
+                    time.sleep(delays[attempt])
+                    continue
+                self.finished.emit(None, f'HTTP {e.code}: {e.reason}')
+                return
+            except Exception as e:
+                self.finished.emit(None, str(e))
+                return
+
+        self.finished.emit(None, f'요청 한도 초과 (잠시 후 다시 시도해주세요)')
 
 
 # ── 스타일 함수 ──────────────────────────────────────────────────────────────
