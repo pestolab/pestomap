@@ -1,6 +1,6 @@
 [general]
 name=PestoMap
-qgisMinimumVersion=3.16
+qgisMinimumVersion=3.0
 description=GIS 실무 자동화 — shp 자동 로드, 색상 설정, 지도 출력
 version=0.1.1
 author=PestoLab
