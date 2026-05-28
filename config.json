@@ -101,6 +101,8 @@
     "label": "기타"
   },
 
+  "gemini_api_key": "AIzaSyBenFA1fP2M696lPQkgmzcCTfjQMkWW3Ms",
+
   "output": {
     "dpi": 300,
     "format": "pdf",
