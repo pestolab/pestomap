@@ -57,6 +57,13 @@ except AttributeError:
 
 PLUGIN_DIR = os.path.dirname(__file__)
 CONFIG_PATH = os.path.join(PLUGIN_DIR, 'config.json')
+
+
+def load_config():
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
 GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 
 SYSTEM_PROMPT = """너는 QGIS GIS 데이터 시각화 전문가야. 도시계획 실무자를 돕는 QGIS 플러그인 안에서 동작해.
