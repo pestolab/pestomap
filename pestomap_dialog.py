@@ -3,7 +3,6 @@ import json
 import glob
 import subprocess
 import urllib.request
-import urllib.error
 from datetime import datetime
 
 from qgis.PyQt.QtWidgets import (
