@@ -41,10 +41,11 @@ def match_layer_config(layer_name, config):
 
 
 def apply_style(layer, preset):
-    """레이어에 색상 스타일 적용"""
-    geom_type = layer.geometryType()
+    """레이어에 색상 스타일 적용. geometry type을 int로 비교해 버전 호환성 확보."""
+    geom_type = int(layer.geometryType())
+    # QgsWkbTypes: PointGeometry=0, LineGeometry=1, PolygonGeometry=2
 
-    if geom_type in (QgsWkbTypes.PolygonGeometry,):
+    if geom_type == 2:  # PolygonGeometry
         symbol = QgsSymbol.defaultSymbol(QgsWkbTypes.PolygonGeometry)
         sym_layer = QgsSimpleFillSymbolLayer()
         fill = QColor(preset['fill_color'])
@@ -54,7 +55,7 @@ def apply_style(layer, preset):
         sym_layer.setStrokeWidth(preset.get('stroke_width', 0.26))
         symbol.changeSymbolLayer(0, sym_layer)
 
-    elif geom_type in (QgsWkbTypes.LineGeometry,):
+    elif geom_type == 1:  # LineGeometry
         symbol = QgsSymbol.defaultSymbol(QgsWkbTypes.LineGeometry)
         sym_layer = QgsSimpleLineSymbolLayer()
         stroke = QColor(preset['stroke_color'])
@@ -63,7 +64,7 @@ def apply_style(layer, preset):
         sym_layer.setWidth(preset.get('stroke_width', 0.5))
         symbol.changeSymbolLayer(0, sym_layer)
 
-    elif geom_type in (QgsWkbTypes.PointGeometry,):
+    elif geom_type == 0:  # PointGeometry
         symbol = QgsSymbol.defaultSymbol(QgsWkbTypes.PointGeometry)
         fill = QColor(preset.get('fill_color', '#F44336'))
         symbol.setColor(fill)
@@ -76,7 +77,7 @@ def apply_style(layer, preset):
     layer.triggerRepaint()
 
 
-def create_print_layout(iface, output_path, fmt, config):
+def create_print_layout(iface, output_path, fmt, config, loaded_layers=None):
     """스케일바·방위표 포함 인쇄 레이아웃 생성 후 출력"""
     project = QgsProject.instance()
     layout = QgsPrintLayout(project)
@@ -113,7 +114,17 @@ def create_print_layout(iface, output_path, fmt, config):
     map_item.attemptResize(
         QgsLayoutSize(map_w, map_h, QgsUnitTypes.LayoutMillimeters)
     )
-    map_item.zoomToExtent(iface.mapCanvas().extent())
+    # 출력 범위: 로드된 레이어 전체 합산 extent 사용 (캔버스 갱신 타이밍 문제 방지)
+    if loaded_layers:
+        combined = QgsRectangle()
+        for lyr in loaded_layers:
+            combined.combineExtentWith(lyr.extent())
+        if not combined.isEmpty():
+            map_item.zoomToExtent(combined)
+        else:
+            map_item.zoomToExtent(iface.mapCanvas().extent())
+    else:
+        map_item.zoomToExtent(iface.mapCanvas().extent())
     map_item.setMapRotation(0)
 
     # 스케일바
@@ -226,8 +237,20 @@ class PestoMapDialog(QDialog):
 
         layout.addWidget(out_group)
 
+        # 색상 설정
+        color_group = QGroupBox('3. 색상 설정')
+        color_layout = QHBoxLayout(color_group)
+        color_label = QLabel('레이어별 색상은 config.json 파일에서 수정합니다.')
+        color_label.setStyleSheet('color: #555; font-size: 11px;')
+        open_config_btn = QPushButton('색상 설정 파일 열기')
+        open_config_btn.clicked.connect(self._open_config)
+        color_layout.addWidget(color_label)
+        color_layout.addStretch()
+        color_layout.addWidget(open_config_btn)
+        layout.addWidget(color_group)
+
         # 옵션
-        opt_group = QGroupBox('3. 옵션')
+        opt_group = QGroupBox('4. 옵션')
         opt_layout = QVBoxLayout(opt_group)
         self.chk_style = QCheckBox('색상 프리셋 자동 적용')
         self.chk_style.setChecked(True)
@@ -261,6 +284,16 @@ class PestoMapDialog(QDialog):
         btn_layout.addWidget(close_btn)
         btn_layout.addWidget(self.run_btn)
         layout.addLayout(btn_layout)
+
+    def _open_config(self):
+        """색상 설정 파일(config.json)을 메모장으로 열기"""
+        import subprocess
+        try:
+            # Windows: 메모장으로 바로 열기
+            subprocess.Popen(['notepad.exe', CONFIG_PATH])
+        except Exception:
+            # 폴백: 탐색기로 파일 위치 열기
+            os.startfile(os.path.dirname(CONFIG_PATH))
 
     def _browse_shp(self):
         path = QFileDialog.getExistingDirectory(self, 'shp 파일 폴더 선택')
@@ -303,12 +336,14 @@ class PestoMapDialog(QDialog):
                 continue
 
             # 색상 적용
+            geom_type = int(layer.geometryType())
+            geom_label = {0: '포인트', 1: '라인', 2: '폴리곤'}.get(geom_type, f'알수없음({geom_type})')
             if self.chk_style.isChecked():
                 preset = match_layer_config(layer_name, self.config)
                 apply_style(layer, preset)
-                self._log(f'  [로드] {layer_name} — {preset.get("label", "기타")} 색상 적용')
+                self._log(f'  [로드] {layer_name} [{geom_label}] — {preset.get("label", "기타")} 색상 적용')
             else:
-                self._log(f'  [로드] {layer_name}')
+                self._log(f'  [로드] {layer_name} [{geom_label}]')
 
             QgsProject.instance().addMapLayer(layer)
             loaded_layers.append(layer)
@@ -326,7 +361,7 @@ class PestoMapDialog(QDialog):
             self._log('지도 출력 중...')
             try:
                 success = create_print_layout(
-                    self.iface, output_path, fmt, self.config
+                    self.iface, output_path, fmt, self.config, loaded_layers
                 )
                 if success:
                     self._log(f'출력 완료: {output_path}')
