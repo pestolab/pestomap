@@ -35,4 +35,4 @@ class PestoMapPlugin:
     def run(self):
         self.dialog = PestoMapDialog(self.iface, self.iface.mainWindow())
         self.dialog.show()
-        self.dialog.exec_()
+        self.dialog.exec()
