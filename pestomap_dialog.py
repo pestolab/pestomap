@@ -2,7 +2,6 @@ import os
 import json
 import glob
 import time
-import subprocess
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -11,7 +10,8 @@ from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog,
     QComboBox, QGroupBox, QCheckBox,
-    QMessageBox, QTextEdit
+    QMessageBox, QTextEdit,
+    QColorDialog, QSlider, QDoubleSpinBox, QScrollArea, QWidget
 )
 from qgis.PyQt.QtCore import Qt, QThread, pyqtSignal, QObject, pyqtSlot
 from qgis.PyQt.QtGui import QFont, QColor, QTextCursor
@@ -380,6 +380,200 @@ class ChatFloatWindow(QDialog):
         self.send_btn.setEnabled(enabled)
 
 
+# ── 색상 설정 다이얼로그 ─────────────────────────────────────────────────────
+
+class ColorSettingsDialog(QDialog):
+    """레이어별 색상·불투명도·선 두께를 UI로 설정하는 팝업"""
+
+    def __init__(self, config, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self._rows = {}   # keyword → {fill_btn, stroke_btn, opacity_slider, opacity_lbl, width_spin}
+        self.setWindowTitle('색상 설정')
+        self.setMinimumWidth(620)
+        self.setMinimumHeight(480)
+        self._build_ui()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # 안내 문구
+        info = QLabel('레이어 키워드별 기본 색상을 설정합니다. 색상 버튼을 클릭하면 색상 팔레트가 열립니다.')
+        info.setStyleSheet('color:#555; font-size:12px; padding:4px 0;')
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        # 스크롤 영역
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet('QScrollArea{border:1px solid #dee2e6; border-radius:4px;}')
+        container = QWidget()
+        grid = QGridLayout(container)
+        grid.setSpacing(8)
+        grid.setContentsMargins(12, 12, 12, 12)
+
+        # 헤더
+        headers = ['레이어', '채움 색상', '테두리 색상', '불투명도', '선 두께(mm)']
+        for col, text in enumerate(headers):
+            lbl = QLabel(text)
+            lbl.setStyleSheet('font-weight:bold; font-size:12px; color:#333; padding-bottom:4px;')
+            grid.addWidget(lbl, 0, col)
+
+        # 구분선 역할의 빈 행
+        sep = QLabel('')
+        sep.setFixedHeight(1)
+        sep.setStyleSheet('background:#e8e8e6;')
+        grid.addWidget(sep, 1, 0, 1, 5)
+
+        # layers + default 행
+        items = list(self.config.get('layers', {}).items())
+        items.append(('(기타/기본)', self.config.get('default', {})))
+
+        for i, (keyword, preset) in enumerate(items):
+            row = i + 2
+            is_default = keyword == '(기타/기본)'
+
+            # 레이어명
+            name_lbl = QLabel(keyword)
+            name_lbl.setStyleSheet(
+                'font-size:13px; color:#888; font-style:italic;' if is_default
+                else 'font-size:13px; font-weight:600;'
+            )
+            grid.addWidget(name_lbl, row, 0)
+
+            # 채움 색상 버튼
+            fill_hex = preset.get('fill_color', '#F5F5F5')
+            fill_btn = QPushButton()
+            fill_btn.setFixedSize(72, 30)
+            fill_btn.setToolTip(fill_hex)
+            self._set_color_btn(fill_btn, fill_hex)
+            cfg_key = None if is_default else keyword
+            fill_btn.clicked.connect(
+                lambda _, k=cfg_key, b=fill_btn, t='fill': self._pick_color(k, t, b)
+            )
+            grid.addWidget(fill_btn, row, 1)
+
+            # 테두리 색상 버튼
+            stroke_hex = preset.get('stroke_color', '#9E9E9E')
+            stroke_btn = QPushButton()
+            stroke_btn.setFixedSize(72, 30)
+            stroke_btn.setToolTip(stroke_hex)
+            self._set_color_btn(stroke_btn, stroke_hex)
+            stroke_btn.clicked.connect(
+                lambda _, k=cfg_key, b=stroke_btn, t='stroke': self._pick_color(k, t, b)
+            )
+            grid.addWidget(stroke_btn, row, 2)
+
+            # 불투명도 슬라이더
+            opacity_val = int(preset.get('opacity', 0.8) * 100)
+            opacity_row = QHBoxLayout()
+            opacity_slider = QSlider()
+            try:
+                opacity_slider.setOrientation(Qt.Orientation.Horizontal)
+            except AttributeError:
+                opacity_slider.setOrientation(Qt.Horizontal)
+            opacity_slider.setRange(0, 100)
+            opacity_slider.setValue(opacity_val)
+            opacity_slider.setFixedWidth(80)
+            opacity_lbl = QLabel(f'{opacity_val}%')
+            opacity_lbl.setFixedWidth(32)
+            opacity_lbl.setStyleSheet('font-size:12px; color:#555;')
+            opacity_slider.valueChanged.connect(lambda v, lbl=opacity_lbl: lbl.setText(f'{v}%'))
+            opacity_row.addWidget(opacity_slider)
+            opacity_row.addWidget(opacity_lbl)
+            opacity_widget = QWidget()
+            opacity_widget.setLayout(opacity_row)
+            grid.addWidget(opacity_widget, row, 3)
+
+            # 선 두께
+            width_spin = QDoubleSpinBox()
+            width_spin.setRange(0.1, 5.0)
+            width_spin.setSingleStep(0.1)
+            width_spin.setDecimals(2)
+            width_spin.setValue(preset.get('stroke_width', 0.26))
+            width_spin.setFixedWidth(80)
+            grid.addWidget(width_spin, row, 4)
+
+            self._rows[keyword] = {
+                'fill_btn': fill_btn,
+                'stroke_btn': stroke_btn,
+                'opacity_slider': opacity_slider,
+                'width_spin': width_spin,
+                'is_default': is_default,
+            }
+
+        grid.setColumnStretch(0, 1)
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+        # 저장 / 취소
+        btn_row = QHBoxLayout()
+        cancel_btn = QPushButton('취소')
+        cancel_btn.setFixedWidth(80)
+        cancel_btn.clicked.connect(self.reject)
+        save_btn = QPushButton('저장')
+        save_btn.setFixedWidth(80)
+        save_btn.setStyleSheet(
+            'QPushButton{background:#2B5EA7;color:white;border-radius:4px;font-weight:bold;}'
+            'QPushButton:hover{background:#1a4a8a;}'
+        )
+        save_btn.clicked.connect(self._save)
+        btn_row.addStretch()
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(save_btn)
+        layout.addLayout(btn_row)
+
+    @staticmethod
+    def _set_color_btn(btn, hex_color):
+        """버튼 배경색 + 텍스트(hex)를 가독성 있게 설정"""
+        color = QColor(hex_color)
+        # 밝기 기준으로 텍스트 색 결정
+        brightness = color.red() * 0.299 + color.green() * 0.587 + color.blue() * 0.114
+        text_color = '#000000' if brightness > 140 else '#ffffff'
+        btn.setText(hex_color.upper())
+        btn.setStyleSheet(
+            f'QPushButton{{background:{hex_color};color:{text_color};'
+            f'border:1px solid #bbb;border-radius:3px;font-size:10px;font-family:monospace;}}'
+            f'QPushButton:hover{{border:2px solid #555;}}'
+        )
+        btn.setToolTip(hex_color)
+
+    def _pick_color(self, keyword, color_type, btn):
+        """QColorDialog로 색상 선택 후 버튼·config 즉시 반영"""
+        if keyword is None:
+            preset = self.config.get('default', {})
+        else:
+            preset = self.config.get('layers', {}).get(keyword, {})
+
+        key = 'fill_color' if color_type == 'fill' else 'stroke_color'
+        current = QColor(preset.get(key, '#ffffff'))
+        color = QColorDialog.getColor(current, self, '색상 선택')
+        if not color.isValid():
+            return
+
+        hex_color = color.name()
+        preset[key] = hex_color
+        self._set_color_btn(btn, hex_color)
+
+    def _save(self):
+        """슬라이더·스핀박스 값 config에 반영 후 config.json 저장"""
+        for keyword, widgets in self._rows.items():
+            if widgets['is_default']:
+                target = self.config.get('default', {})
+            else:
+                target = self.config.get('layers', {}).get(keyword, {})
+            target['opacity'] = widgets['opacity_slider'].value() / 100.0
+            target['stroke_width'] = round(widgets['width_spin'].value(), 2)
+
+        try:
+            with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+            self.accept()
+        except Exception as e:
+            QMessageBox.warning(self, '저장 실패', str(e))
+
+
 # ── Dialog ───────────────────────────────────────────────────────────────────
 
 class PestoMapDialog(QDialog):
@@ -447,8 +641,9 @@ class PestoMapDialog(QDialog):
         self.chk_style.setChecked(True)
         self.chk_export = QCheckBox('지도 출력')
         self.chk_export.setChecked(True)
-        open_cfg_btn = QPushButton('색상 설정 파일 열기')
-        open_cfg_btn.clicked.connect(self._open_config)
+        open_cfg_btn = QPushButton('색상 설정')
+        open_cfg_btn.setStyleSheet('padding:4px 12px; border:1px solid #aaa; border-radius:3px;')
+        open_cfg_btn.clicked.connect(self._open_color_settings)
         opt_layout.addWidget(self.chk_style)
         opt_layout.addWidget(self.chk_export)
         opt_layout.addStretch()
@@ -525,12 +720,16 @@ class PestoMapDialog(QDialog):
         if p:
             self.out_path.setText(p)
 
-    def _open_config(self):
+    def _open_color_settings(self):
+        dlg = ColorSettingsDialog(self.config, self)
         try:
-            subprocess.Popen(['notepad.exe', CONFIG_PATH])  # Windows
-        except Exception:
+            accepted = dlg.exec()
+        except TypeError:
+            accepted = dlg.exec_()
+        if accepted:
+            # 저장 후 config 리로드 (다른 인스턴스와 동기화)
             try:
-                subprocess.Popen(['open', CONFIG_PATH])     # macOS
+                self.config = load_config()
             except Exception:
                 pass
 
