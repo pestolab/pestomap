@@ -71,7 +71,7 @@ def load_config():
         raise RuntimeError(f'config.json 파싱 오류: {e}')
 
 
-GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent'
+GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent'
 
 SYSTEM_PROMPT = """너는 QGIS GIS 데이터 시각화 전문가야. 도시계획 실무자를 돕는 QGIS 플러그인 안에서 동작해.
 
