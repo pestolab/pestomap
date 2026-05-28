@@ -4,6 +4,7 @@ import glob
 import subprocess
 import urllib.request
 import urllib.error
+from datetime import datetime
 
 from qgis.PyQt.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -310,7 +311,10 @@ class PestoMapDialog(QDialog):
         self.config = load_config()
         self.loaded_layers = []
         self._gemini_thread = None
-        self.setWindowTitle('PestoMap v0.2')
+        self._undo_stack = []       # [(layer, renderer_clone), ...]
+        self._session = None        # 현재 세션 dict
+        self._session_path = None   # session.json 저장 경로
+        self.setWindowTitle('PestoMap v0.3')
         self.setMinimumWidth(520)
         self.setMinimumHeight(640)
         self._build_ui()
@@ -404,9 +408,18 @@ class PestoMapDialog(QDialog):
             'QPushButton:hover{background:#1a4a8a;}'
         )
         self.run_btn.clicked.connect(self._run)
+        self.undo_btn = QPushButton('↩ 되돌리기')
+        self.undo_btn.setEnabled(False)
+        self.undo_btn.setStyleSheet(
+            'QPushButton{padding:8px 16px;border-radius:4px;border:1px solid #ccc;}'
+            'QPushButton:enabled{color:#333;}'
+            'QPushButton:disabled{color:#aaa;}'
+        )
+        self.undo_btn.clicked.connect(self._undo)
         close_btn = QPushButton('닫기')
         close_btn.clicked.connect(self.close)
         btn_row.addStretch()
+        btn_row.addWidget(self.undo_btn)
         btn_row.addWidget(close_btn)
         btn_row.addWidget(self.run_btn)
         layout.addLayout(btn_row)
@@ -452,6 +465,9 @@ class PestoMapDialog(QDialog):
 
         self.run_btn.setEnabled(False)
         self.chat_display.clear()
+        self._undo_stack.clear()
+        self.undo_btn.setEnabled(False)
+        self._init_session(shp_dir)
         self._chat('SYS', '레이어 로드 중...')
 
         shp_files = glob.glob(os.path.join(shp_dir, '**', '*.shp'), recursive=True)
@@ -476,6 +492,9 @@ class PestoMapDialog(QDialog):
             self._chat('SYS', f'[로드] {name} [{geom_label}]')
 
         self._chat('SYS', f'{len(self.loaded_layers)}개 레이어 로드 완료')
+        if self._session is not None:
+            self._session['layers'] = [l.name() for l in self.loaded_layers]
+            self._log_session('load', {'count': len(self.loaded_layers)})
 
         if self.chk_export.isChecked() and self.loaded_layers:
             out_dir = self.out_path.text().strip() or shp_dir
@@ -508,11 +527,20 @@ class PestoMapDialog(QDialog):
         msg = self.chat_input.text().strip()
         if not msg:
             return
+
+        # 되돌리기 키워드 감지
+        if any(kw in msg for kw in ['되돌려', '취소', 'undo', '원래대로']):
+            self._chat('USER', msg)
+            self.chat_input.clear()
+            self._undo()
+            return
+
         api_key = self.config.get('gemini_api_key', '')
         if not api_key:
             self._chat('SYS', 'config.json에 gemini_api_key가 없습니다.')
             return
         self._chat('USER', msg)
+        self._log_session('chat', {'role': 'user', 'text': msg})
         self.chat_input.clear()
         ctx = build_layer_context(self.loaded_layers) if self.loaded_layers else '(로드된 레이어 없음)'
         prompt = f"{SYSTEM_PROMPT}\n\n현재 레이어:\n{ctx}\n\n사용자 요청: {msg}"
@@ -552,11 +580,68 @@ class PestoMapDialog(QDialog):
         msg = parsed.get('message', '')
         if msg:
             self._chat('AI', msg)
+            self._log_session('chat', {'role': 'ai', 'text': msg})
 
         for action in parsed.get('actions', []):
             self._execute_action(action)
 
+    # ── 세션 관리 ──
+
+    def _init_session(self, shp_dir):
+        """새 세션 초기화 및 폴더 생성"""
+        out_dir = self.out_path.text().strip() or shp_dir
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        session_dir = os.path.join(out_dir, 'sessions', ts)
+        try:
+            os.makedirs(session_dir, exist_ok=True)
+            self._session_path = os.path.join(session_dir, 'session.json')
+            self._session = {
+                'started_at': ts,
+                'shp_dir': shp_dir,
+                'layers': [],
+                'log': []
+            }
+        except Exception:
+            self._session = None
+            self._session_path = None
+
+    def _log_session(self, event_type, data):
+        """세션 로그에 이벤트 추가 후 저장"""
+        if self._session is None:
+            return
+        self._session['log'].append({
+            'time': datetime.now().strftime('%H:%M:%S'),
+            'type': event_type,
+            'data': data
+        })
+        try:
+            with open(self._session_path, 'w', encoding='utf-8') as f:
+                json.dump(self._session, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
     # ── 액션 실행 ──
+
+    def _snapshot(self, layer):
+        """실행 전 renderer 스냅샷 저장 (최대 10단계)"""
+        if layer.renderer():
+            self._undo_stack.append((layer, layer.renderer().clone()))
+            if len(self._undo_stack) > 10:
+                self._undo_stack.pop(0)
+            self.undo_btn.setEnabled(True)
+
+    def _undo(self):
+        """마지막 스타일 변경 되돌리기"""
+        if not self._undo_stack:
+            self._chat('SYS', '되돌릴 내용이 없습니다.')
+            return
+        layer, renderer = self._undo_stack.pop()
+        layer.setRenderer(renderer)
+        layer.triggerRepaint()
+        self._chat('SYS', f'↩ {layer.name()} 이전 스타일로 복원')
+        self._log_session('undo', {'layer': layer.name()})
+        if not self._undo_stack:
+            self.undo_btn.setEnabled(False)
 
     def _execute_action(self, action):
         atype = action.get('type')
@@ -572,6 +657,7 @@ class PestoMapDialog(QDialog):
             if not target:
                 self._chat('SYS', f'레이어 없음: {layer_name}')
                 return
+            self._snapshot(target)
             ok = apply_graduated_style(
                 target,
                 action.get('field', ''),
@@ -580,18 +666,24 @@ class PestoMapDialog(QDialog):
                 action.get('mode', 'quantile')
             )
             self._chat('SYS', f'✓ {target.name()} 등급 분류 적용' if ok else f'✗ {target.name()} 등급 분류 실패')
+            if ok:
+                self._log_session('action', action)
 
         elif atype == 'categorized':
             if not target:
                 self._chat('SYS', f'레이어 없음: {layer_name}')
                 return
+            self._snapshot(target)
             ok = apply_categorized_style(target, action.get('field', ''), action.get('categories', {}))
             self._chat('SYS', f'✓ {target.name()} 범주 분류 적용' if ok else f'✗ {target.name()} 범주 분류 실패')
+            if ok:
+                self._log_session('action', action)
 
         elif atype == 'single':
             if not target:
                 self._chat('SYS', f'레이어 없음: {layer_name}')
                 return
+            self._snapshot(target)
             apply_single_style(target, {
                 'fill_color': action.get('fill_color', '#F5F5F5'),
                 'stroke_color': action.get('stroke_color', '#9E9E9E'),
@@ -599,6 +691,7 @@ class PestoMapDialog(QDialog):
                 'stroke_width': action.get('stroke_width', 0.26),
             })
             self._chat('SYS', f'✓ {target.name()} 색상 변경')
+            self._log_session('action', action)
 
         elif atype == 'export':
             fmt = action.get('format', 'pdf')
